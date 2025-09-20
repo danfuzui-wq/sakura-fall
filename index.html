@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hiệu ứng rơi hoa anh đào (Sakura) — Demo</title>
+  <style>
+    /* Reset */
+    html,body{height:100%;margin:0}
+    body{font-family:system-ui,Segoe UI,Roboto,'Noto Sans',sans-serif;background:#fff}
+
+    /* Container giữ hiệu ứng - đặt position fixed để phủ toàn trang */
+    .sakura-wrap{
+      position:fixed;inset:0;pointer-events:none;z-index:9999;overflow:hidden;
+    }
+
+    /* Mỗi cánh hoa */
+    .sakura{
+      position:absolute;top:-10vh;left:0;will-change:transform,opacity;
+      width:28px;height:28px;opacity:0.95;transform-origin:center;
+    }
+
+    /* Một SVG cánh hoa nhỏ dùng làm hình (inline SVG sẽ được chèn vào mỗi element) */
+    .sakura svg{width:100%;height:100%;display:block}
+
+    /* Tùy animation sẽ được gán động bằng JS (tốc độ, độ lệch, xoay) */
+
+    /* Tùy chọn nút bật/tắt (chỉ ví dụ - pointer-events bật cho vùng này) */
+    .sakura-control{position:fixed;right:12px;bottom:12px;z-index:10000;pointer-events:auto}
+    .sakura-control button{background:#fff;border:1px solid #eee;padding:8px 10px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer}
+
+    /* Giảm hiệu ứng trên các màn nhỏ hoặc khi hiệu năng kém */
+    @media (max-width:640px){
+      .sakura{width:20px;height:20px}
+    }
+  </style>
+</head>
+<body>
+
+  <div id="sakuraWrap" class="sakura-wrap" aria-hidden="true"></div>
+
+  <!-- Control demo (tắt/bật) -->
+  <div class="sakura-control">
+    <button id="toggleBtn">Tắt hoa anh đào</button>
+  </div>
+
+  <main style="padding:40px;max-width:800px;margin:0 auto;">
+    <h1>Trang demo: Hiệu ứng rơi hoa anh đào 🌸</h1>
+    <p>Hiệu ứng này được tạo bằng JavaScript: sẽ thêm phần tử <code>.sakura</code> vào trang và gán animation động cho từng cánh hoa. Bạn có thể nhúng trực tiếp mã này vào website (ví dụ: ở cuối &lt;body&gt;).</p>
+  </main>
+
+  <script>
+  /* ---------- Cấu hình (dễ chỉnh) ---------- */
+  const CONFIG = {
+    petalCount: 30,           // Số lượng mặc định trên màn hình
+    spawnInterval: 600,       // (ms) thời gian tạo một cánh mới (mức thấp -> nhiều hơn)
+    minSize: 18,              // px
+    maxSize: 42,              // px
+    fallDurationMin: 6000,    // ms
+    fallDurationMax: 12000,   // ms
+    swayRange: 120,           // px biên độ ngang khi rơi
+    rotationMin: -30,         // độ
+    rotationMax: 360,         // độ
+    useImage: false,          // Nếu muốn dùng image URL: true
+    imageURL: ''              // URL ảnh cánh hoa (PNG/SVG) nếu useImage=true
+  };
+
+  /* ---------- SVG cánh hoa (dự phòng, nhẹ, không cần tải thêm file) ---------- */
+  const PETAL_SVG = `
+  <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+        <stop offset="0" stop-color="#FFE9F0"/>
+        <stop offset="1" stop-color="#FFCFE0"/>
+      </linearGradient>
+    </defs>
+    <path d="M32 4c6 0 12 6 12 12 0 6-10 14-12 16-2-2-12-10-12-16C20 10 26 4 32 4z"
+          fill="url(#g)" stroke="#FFB3CF" stroke-width="1"/>
+  </svg>`;
+
+  /* ---------- Helper random ---------- */
+  function rand(min, max){ return Math.random() * (max - min) + min }
+  function randInt(min, max){ return Math.floor(rand(min, max+1)) }
+
+  const wrap = document.getElementById('sakuraWrap');
+  let running = true;
+  let intervalId = null;
+
+  function createPetal(){
+    const el = document.createElement('div');
+    el.className = 'sakura';
+
+    const size = Math.round(rand(CONFIG.minSize, CONFIG.maxSize));
+    el.style.width = size + 'px';
+    el.style.height = size + 'px';
+
+    // vị trí xuất hiện ngang (có thể xuất từ ngoài lề) - đặt phần trăm
+    const startX = rand(-10, 110); // % của viewport width
+    el.style.left = startX + 'vw';
+
+    // nội dung: dùng ảnh nếu có, nếu không dùng SVG inline
+    if(CONFIG.useImage && CONFIG.imageURL){
+      el.innerHTML = `<img src="${CONFIG.imageURL}" alt="" style="width:100%;height:100%;display:block;"/>`;
+    } else {
+      el.innerHTML = PETAL_SVG;
+    }
+
+    // rời rạc hoá animation bằng transform + transition + requestAnimationFrame
+    const duration = rand(CONFIG.fallDurationMin, CONFIG.fallDurationMax);
+    const sway = rand(40, CONFIG.swayRange);
+    const rotateFrom = rand(CONFIG.rotationMin, CONFIG.rotationMax);
+    const rotateTo = rotateFrom + rand(90, 720);
+
+    // Random delay nhỏ để không đồng bộ
+    const delay = rand(0, 1200);
+
+    // Thiết lập animation bằng CSS transition (tối ưu nhẹ) hoặc keyframes
+    // 1) đặt trạng thái bắt đầu
+    el.style.transform = `translateY(-10vh) rotate(${rotateFrom}deg) translateX(0px)`;
+    el.style.opacity = (rand(0.75, 1)).toFixed(2);
+
+    // Thêm vào DOM
+    wrap.appendChild(el);
+
+    // Force reflow để transition có hiệu lực
+    void el.offsetWidth;
+
+    // Tính toạ độ kết thúc
+    const endY = window.innerHeight + 100; // px
+    const swayX = (Math.random() < 0.5 ? -1 : 1) * sway;
+    const durationSec = duration / 1000;
+
+    // Tạo keyframes bằng animate() Web Animations API (nhẹ, có control)
+    if(el.animate){
+      const keyframes = [
+        { transform: `translateY(-10vh) rotate(${rotateFrom}deg) translateX(0px)`, opacity: el.style.opacity },
+        { transform: `translateY(${endY}px) rotate(${rotateTo}deg) translateX(${swayX}px)`, opacity: 0.9 }
+      ];
+      const anim = el.animate(keyframes, {
+        duration: duration,
+        delay: delay,
+        easing: 'linear'
+      });
+      anim.onfinish = () => el.remove();
+    } else {
+      // Fallback: transition
+      el.style.transition = `transform ${durationSec}s linear ${delay/1000}s, opacity ${durationSec}s linear ${delay/1000}s`;
+      el.style.transform = `translateY(${endY}px) rotate(${rotateTo}deg) translateX(${swayX}px)`;
+      el.style.opacity = '0.9';
+      setTimeout(()=> el.remove(), duration + delay + 200);
+    }
+  }
+
+  function startSpawning(){
+    if(intervalId) return;
+    // tạo ngay một vài chiếc để đầy sớm
+    for(let i=0;i<Math.min(CONFIG.petalCount,6);i++) createPetal();
+    intervalId = setInterval(()=>{
+      if(!running) return;
+      // nếu quá nhiều phần tử, tạm dừng tạo
+      if(wrap.children.length > CONFIG.petalCount * 1.5) return;
+      createPetal();
+    }, CONFIG.spawnInterval);
+  }
+
+  function stopSpawning(){
+    clearInterval(intervalId); intervalId = null;
+  }
+
+  // Toggle control
+  const toggleBtn = document.getElementById('toggleBtn');
+  toggleBtn.addEventListener('click', ()=>{
+    running = !running;
+    toggleBtn.textContent = running ? 'Tắt hoa anh đào' : 'Bật hoa anh đào';
+    if(running) startSpawning();
+  });
+
+  // Start on load
+  startSpawning();
+
+  // Clean up on page hide to avoid memory leak
+  window.addEventListener('pagehide', ()=>{
+    stopSpawning();
+  });
+
+  // Hỗ trợ resume when tab becomes visible
+  document.addEventListener('visibilitychange', ()=>{
+    if(document.hidden) stopSpawning(); else startSpawning();
+  });
+
+  // Expose a small API (optional) để dev có thể điều khiển từ console
+  window.SAKURA = {
+    start: ()=>{ running = true; startSpawning(); },
+    stop: ()=>{ running = false; stopSpawning(); },
+    setCount: (n)=>{ CONFIG.petalCount = Number(n) },
+    config: CONFIG
+  };
+  </script>
+</body>
+</html>
